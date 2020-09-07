@@ -1,5 +1,15 @@
 Didn't see a lot of examples out there for this framework, so decided to create one.
 
+## Deployment
+
+We will be using Deta to deploy this API. It's very easy and free.
+
+1. signup for a free account, then install the cli and login.
+2. Clone this repo and `cd`into it.
+3. run `deta new`
+
+Now wait about a minute (installing the dependacies takes some time). You will see a URL, this is the endpoint
+
 ## Step 1: Hello World of FastAPI, Stub out the API endpoints
 
 * Display Hello World

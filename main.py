@@ -1,32 +1,20 @@
-import models
 import yfinance
-from fastapi import FastAPI, Request, Depends, BackgroundTasks
+from deta import App, Deta
+from fastapi import BackgroundTasks, Depends, FastAPI, Request
 from fastapi.templating import Jinja2Templates
-from database import SessionLocal, engine
-from pydantic import BaseModel 
-from models import Stock
-from sqlalchemy.orm import Session
+from pydantic import BaseModel
 
-app = FastAPI()
-
-models.Base.metadata.create_all(bind=engine)
-
+deta = Deta()
+db = deta.Base("stocks")
+app = App(FastAPI())
 templates = Jinja2Templates(directory="templates")
 
 class StockRequest(BaseModel):
     symbol: str
 
 
-def get_db():
-    try:
-        db = SessionLocal()
-        yield db
-    finally:
-        db.close()
-
-
 @app.get("/")
-def home(request: Request, forward_pe = None, dividend_yield = None, ma50 = None, ma200 = None, db: Session = Depends(get_db)):
+def home(request: Request, forward_pe = None, dividend_yield = None, ma50 = None, ma200 = None):
     """
     show all stocks in the database and button to add more
     button next to each stock to delete from database
@@ -34,21 +22,20 @@ def home(request: Request, forward_pe = None, dividend_yield = None, ma50 = None
     button next to each to add a note or save for later
     """
 
-    stocks = db.query(Stock)
-
+    query = {}
     if forward_pe:
-        stocks = stocks.filter(Stock.forward_pe < forward_pe)
+        query["forward_pe?gt"] = forward_pe
 
     if dividend_yield:
-        stocks = stocks.filter(Stock.dividend_yield > dividend_yield)
+        query["dividend_yield?gt"] = dividend_yield
     
+    stocks = next(db.fetch(query))
     if ma50:
-        stocks = stocks.filter(Stock.price > Stock.ma50)
+        stocks = [s for s in stocks if s.get("price") and s.get("price") > s.get("ma50")]
     
     if ma200:
-        stocks = stocks.filter(Stock.price > Stock.ma200)
-    
-    stocks = stocks.all()
+        stocks = [s for s in stocks if s.get("price") and s.get("price") > s.get("ma200")]
+
 
     return templates.TemplateResponse("home.html", {
         "request": request, 
@@ -60,40 +47,39 @@ def home(request: Request, forward_pe = None, dividend_yield = None, ma50 = None
     })
 
 
-def fetch_stock_data(id: int):
-    
-    db = SessionLocal()
-
-    stock = db.query(Stock).filter(Stock.id == id).first()
-
-    yahoo_data = yfinance.Ticker(stock.symbol)
-
-    stock.ma200 = yahoo_data.info['twoHundredDayAverage']
-    stock.ma50 = yahoo_data.info['fiftyDayAverage']
-    stock.price = yahoo_data.info['previousClose']
-    stock.forward_pe = yahoo_data.info['forwardPE']
-    stock.forward_eps = yahoo_data.info['forwardEps']
-    stock.dividend_yield = yahoo_data.info['dividendYield'] * 100
-
-    db.add(stock)
-    db.commit()
+def fetch_stock_data(symbol: str):
+    yahoo_data = yfinance.Ticker(symbol)
+    print(yahoo_data, "hello")
+    db.put({
+        "key": symbol,
+        "symbol": symbol,
+        "ma200": yahoo_data.info['twoHundredDayAverage'],
+        "ma50": yahoo_data.info['fiftyDayAverage'],
+        "price": yahoo_data.info['previousClose'],
+        "forward_pe": yahoo_data.info['forwardPE'],
+        "forward_eps": yahoo_data.info['forwardEps'],
+        "dividend_yield": (yahoo_data.info.get('dividendYield') or 0) * 100
+    })
 
 
 @app.post("/stock")
-async def create_stock(stock_request: StockRequest, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+async def create_stock(stock_request: StockRequest, background_tasks: BackgroundTasks):
     """
     add one or more tickers to the database
     background task to use yfinance and load key statistics
     """
 
-    stock = Stock()
-    stock.symbol = stock_request.symbol
-    db.add(stock)
-    db.commit()
-
-    background_tasks.add_task(fetch_stock_data, stock.id)
+    background_tasks.add_task(fetch_stock_data, stock_request.symbol)
 
     return {
         "code": "success",
         "message": "stock was added to the database"
     }
+
+
+@app.lib.run()
+def reset_db(event):
+    items = next(db.fetch())
+    for item in items:
+        db.delete(item["key"])
+    return "OK"
