@@ -1,6 +1,8 @@
 Didn't see a lot of examples out there for this framework, so decided to create one.
 
-## Deployment
+[![Deploy](https://button.deta.dev/1/svg)](https://go.deta.dev/deploy)
+
+## Mnual Deployment
 
 We will be using Deta to deploy this API. It's very easy and free.
 
